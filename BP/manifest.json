@@ -1,0 +1,67 @@
+{
+	"format_version": 2,
+	"metadata": {
+		"authors": [
+			"Thibaults"
+		],
+		"generated_with": {
+			"bridge": [
+				"2.7.41"
+			],
+			"dash": [
+				"0.11.7"
+			]
+		}
+	},
+	"header": {
+		"name": "Tag",
+		"description": "Just a friendly game of tag",
+		"min_engine_version": [
+			1,
+			21,
+			0
+		],
+		"uuid": "0bb375b9-2284-4b97-b670-946278445929",
+		"version": [
+			1,
+			0,
+			0
+		]
+	},
+	"modules": [
+		{
+			"type": "data",
+			"uuid": "61ce353c-2dd8-4e15-a511-e9da8f589b36",
+			"version": [
+				1,
+				0,
+				0
+			]
+		},
+		{
+			"type": "script",
+			"language": "javascript",
+			"uuid": "e674f161-0ac4-4008-a6c8-1550b83738bc",
+			"entry": "scripts/main.js",
+			"version": [
+				1,
+				0,
+				0
+			]
+		}
+	],
+	"dependencies": [
+		{
+			"module_name": "@minecraft/server",
+			"version": "1.17.0-beta"
+		},
+		{
+			"module_name": "@minecraft/server-gametest",
+			"version": "1.0.0-beta"
+		},
+		{
+			"module_name": "@minecraft/server-ui",
+			"version": "1.4.0-beta"
+		}
+	]
+}

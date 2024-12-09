@@ -1,0 +1,45 @@
+{
+	"type": "minecraftBedrock",
+	"name": "Tag",
+	"namespace": "bridge",
+	"authors": [
+		"Thibaults"
+	],
+	"targetVersion": "1.21.50",
+	"description": "Just a friendly game of tag",
+	"experimentalGameplay": {
+		"creationOfCustomBiomes": false,
+		"upcomingCreatorFeatures": false,
+		"enableGameTestFramework": true,
+		"focusTargetCamera": false,
+		"dataDrivenJigsawStructures": false,
+		"aimAssist": false,
+		"educationEdition": false
+	},
+	"bdsProject": false,
+	"packs": {
+		"behaviorPack": "./BP"
+	},
+	"worlds": [
+		"./worlds/*"
+	],
+	"compiler": {
+		"plugins": [
+			"generatorScripts",
+			"typeScript",
+			"entityIdentifierAlias",
+			"customEntityComponents",
+			"customItemComponents",
+			"customBlockComponents",
+			"customCommands",
+			"moLang",
+			"formatVersionCorrection",
+			[
+				"simpleRewrite",
+				{
+					"packName": "Tag"
+				}
+			]
+		]
+	}
+}
