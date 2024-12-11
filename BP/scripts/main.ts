@@ -9,8 +9,8 @@ class PlayerData {
 
 function mainTick() {
     if (system.currentTick % 100 === 0) {
-        world.getAllPlayers().forEach(printPlayer);
-        world.sendMessage("[Current Tick: " + system.currentTick + "]");
+        //world.getAllPlayers().forEach(printPlayer);
+        //world.sendMessage("[Current Tick: " + system.currentTick + "]");
     }
 
     system.run(mainTick);

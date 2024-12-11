@@ -14,7 +14,6 @@ Object.defineProperty(globalThis, 'ChatCommand', {
 * @param {string[]} [alias=[]] - Array of aliases for the command.
 * @param {boolean|((player: Player) => boolean)} [permissions=false] - Boolean or function indicating if the player has permission to use the command.
 * @param {((player: Player, args: {key: string | boolean | number}, commandString: string) => void)} callback - The function to execute when the command is triggered.
-* @param {{key: 'string' | 'bool' | 'number'}} args 
 * @returns {void}
 */
             create(command, description, alias = [], args, permissions = false, callback) {
@@ -52,3 +51,5 @@ Object.defineProperty(globalThis, 'ChatCommand', {
     },
 });
 export default globalThis.ChatCommand;
+
+////* @param {{key: 'string' | 'bool' | 'number'}} args 
