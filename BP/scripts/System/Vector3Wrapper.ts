@@ -27,6 +27,11 @@ export class Vector3Wrapper implements Vector3 {
         return new Vector3Wrapper(this.x * scalar, this.y * scalar, this.z * scalar);
     }
 
+    normalize() {
+        const magnitude = Math.sqrt(this.x ** 2 + this.y ** 2 + this.z ** 2);
+        return new Vector3Wrapper(this.x / magnitude, this.y / magnitude, this.z / magnitude);
+    }
+
     toString(): string {
         return `(${this.x}, ${this.y}, ${this.z})`
     }

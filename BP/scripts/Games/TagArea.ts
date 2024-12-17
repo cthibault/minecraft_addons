@@ -2,6 +2,7 @@ import { Player, world, system, Vector3, Block, BlockPermutation } from "@minecr
 import { MinecraftBlockTypes } from "../Helpers/vanilla-data.js";
 import { Vector3Wrapper } from "../System/Vector3Wrapper.js"
 import { ChatColorCodes } from "../System/ChatCodes.js"
+import { Logger } from "../System/Logger.js"
 
 
 export enum TagAreaStates {
@@ -94,7 +95,7 @@ export class TagArea {
 
             // Build the tag area border in a background process
             system.run(() => {
-                this.printDebug(player, "[Background Processing Started] Build border locations");
+                Logger.debug("[Background Processing Started] Build border locations", player);
                 if (!this.buildTagArea(player)) {
                     this.backgroundProcessHandle = system.runInterval(() => {
                         this.buildTagArea(player);
@@ -187,7 +188,7 @@ export class TagArea {
 
             // Remove the tag area border and reset the tag area in a background process
             system.run(() => {
-                this.printDebug(player, "[Background Processing Started] Remove border location.");
+                Logger.debug("[Background Processing Started] Remove border location.", player);
 
                 if (!this.resetTagArea(player)) {
                     this.backgroundProcessHandle = system.runInterval(() => {
@@ -240,7 +241,7 @@ export class TagArea {
     tryReplaceBlock(player: Player, location: Vector3Wrapper, toBlockTypeId: string, fromBlockTypeIds: string[], debugMessagePrefix: string = ""): boolean {
         // Find the top block for Location.X, Location.Z
         const xzLocation = { x: location.x, z: location.z };
-        this.printDebug(player, `${debugMessagePrefix}TryReplaceBlock at ${JSON.stringify(xzLocation)}`);
+        Logger.debug(`${debugMessagePrefix}TryReplaceBlock at ${JSON.stringify(xzLocation)}`, player);
 
         const topBlock = player.dimension.getTopmostBlock(xzLocation);
         if (topBlock === undefined) {
@@ -285,7 +286,7 @@ export class TagArea {
         debugMessagePrefix: string = ""): ReplaceBlockResult {
 
         let result: ReplaceBlockResult = ReplaceBlockResult.None;
-        this.printDebug(player, `${debugMessagePrefix}TryGet block at ${location}`);
+        Logger.debug(`${debugMessagePrefix}TryGet block at ${location}`, player);
         const block = player.dimension.getBlock(location);
 
         // We weren't able to get the block.  This usually means block is in an unloaded chunk.
@@ -295,14 +296,14 @@ export class TagArea {
             result = ReplaceBlockResult.BlockInUnloadedChunk;
         }
         else {
-            this.printDebug(player, `${debugMessagePrefix}  Block has typeId: ${block.typeId}`);
+            Logger.debug(`${debugMessagePrefix}  Block has typeId: ${block.typeId}`, player);
 
             if (block.typeId === toBlockTypeId) {
-                this.printDebug(player, `${debugMessagePrefix}  ${ChatColorCodes.blue}Block permutation is already ${toBlockTypeId}`);
+                Logger.debug(`${debugMessagePrefix}  ${ChatColorCodes.blue}Block permutation is already ${toBlockTypeId}`, player);
                 result = ReplaceBlockResult.BlockAlreadySet;
             }
             else if (fromBlockTypeIds.includes(block.typeId)) {
-                this.printDebug(player, `${debugMessagePrefix}  ${ChatColorCodes.blue}Setting block permutation to ${toBlockTypeId}`);
+                Logger.debug(`${debugMessagePrefix}  ${ChatColorCodes.blue}Setting block permutation to ${toBlockTypeId}`, player);
                 block.setPermutation(BlockPermutation.resolve(toBlockTypeId));
                 result = ReplaceBlockResult.BlockReplaced;
             }
@@ -312,7 +313,7 @@ export class TagArea {
             }
         }
 
-        this.printDebug(player, `${debugMessagePrefix}  ReplaceResult: ${result}`);
+        Logger.debug(`${debugMessagePrefix}  ReplaceResult: ${result}`, player);
         return result;
     }
 
@@ -323,12 +324,6 @@ export class TagArea {
             l.z === location.z);
         if (!alreadyExists) {
             array.push(location);
-        }
-    }
-
-    private printDebug(player: Player, message: string) {
-        if (this.isDebug) {
-            player.sendMessage(`${ChatColorCodes.gray}${message}`);
         }
     }
 }

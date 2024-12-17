@@ -1,11 +1,6 @@
 import { world, system, Player } from "@minecraft/server";
 import "./Commands/CommandIndex.js"
 
-const PlayerDataMap = new Map<string, PlayerData>();
-
-class PlayerData {
-}
-
 
 function mainTick() {
     if (system.currentTick % 100 === 0) {
@@ -17,6 +12,7 @@ function mainTick() {
 }
 
 system.run(mainTick);
+
 
 function printPlayer(player: Player) {
     // let playerData: PlayerData;
