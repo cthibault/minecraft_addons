@@ -56,7 +56,6 @@ ChatCommand.create('GetGameData', 'Get Game Data', ['td'], { 'includePlayerData'
                 includePlayerData: args['includePlayerData'],
                 includeTagArea: args['includeTagArea'],
             })}`);
-            game.stop();
         }
     });
 });

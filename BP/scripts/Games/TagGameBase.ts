@@ -84,6 +84,7 @@ export interface TagGameJsonDataOptions {
 export interface TagGameInitOptions {
     clearPlayerInventories: boolean;
     defaultTaggerName: string;
+    tagAreaSideLength: number,
     defaultInventoryItems: InventoryItem[];
 }
 
@@ -92,10 +93,7 @@ interface InventoryItem {
     typeId: string
 }
 
-
-
 export class TagGame {
-    private isDebug: boolean = true;
     private tagArea: TagArea;
     private mode: TagGameModes;
     private rules: TagGameRules;
@@ -108,20 +106,14 @@ export class TagGame {
     private playerData: Map<string, PlayerData>;
 
     private itemUseBeforeEventHandle: (arg: ItemUseBeforeEvent) => void;
-    private itemUseOnBeforeEventHandle: (arg: ItemUseOnBeforeEvent) => void;
     private playerLeaveAfterEventHandle: (arg: PlayerLeaveAfterEvent) => void;
     private targetPlayerPrintHandle: number = undefined;
 
-    constructor(initOptions?: TagGameInitOptions) {
+    constructor() {
         this.tagArea = new TagArea();
         this.mode = TagGameModes.Standard;
         this.rules = new TagGameRules();
         this.state = TagGameStates.New;
-        this.initOptions = initOptions ?? {
-            clearPlayerInventories: true,
-            defaultTaggerName: undefined,
-            defaultInventoryItems: undefined
-        };
 
         this.taggers = [];
         this.runners = [];
@@ -167,8 +159,6 @@ export class TagGame {
 
             case "itemUseBeforeEventHandle":
                 return getRegisteredState(this.itemUseBeforeEventHandle);
-            case "itemUseOnBeforeEventHandle":
-                return getRegisteredState(this.itemUseOnBeforeEventHandle);
             case "playerLeaveAfterEventHandle":
                 return getRegisteredState(this.playerLeaveAfterEventHandle);
 
@@ -177,10 +167,18 @@ export class TagGame {
         }
     }
 
-    start(player: Player) {
-        // Capture default player inventory based on the player starting the game
-        if (this.initOptions.defaultInventoryItems === undefined) {
-            this.initOptions.defaultInventoryItems = [];
+    start(player: Player, initOptions?: TagGameInitOptions) {
+        if (initOptions !== undefined) {
+            this.initOptions = initOptions
+        }
+
+        if (this.initOptions === undefined) {
+            this.initOptions = {
+                clearPlayerInventories: true,
+                defaultTaggerName: undefined,
+                tagAreaSideLength: 100,
+                defaultInventoryItems: []
+            };
 
             var playerActor = new PlayerActor(player);
             var inventory = playerActor.getInventory();
@@ -206,10 +204,7 @@ export class TagGame {
         this.state = TagGameStates.Stopped;
 
         this.unsubscribeFromEvents();
-
-        if (this.targetPlayerPrintHandle !== undefined) {
-            system.clearRun(this.targetPlayerPrintHandle);
-        }
+        this.cleanupBackgroundActions();
     }
 
     private initPlayers(player: Player) {
@@ -273,6 +268,8 @@ export class TagGame {
                     finder.nameTag = "finder";
                     inventory.container.addItem(finder);
                 }
+
+                playerData.inventoryConfigured = true;
             }
         });
 
@@ -284,7 +281,10 @@ export class TagGame {
             })) {
                 if (!this.playerData.has(debugEntity.nameTag)) {
                     player.sendMessage(`Found debug entity: ${debugEntity.nameTag}`);
-                    this.playerData.set(debugEntity.nameTag, new PlayerData(debugEntity.nameTag));
+                    const pd = new PlayerData(debugEntity.nameTag);
+                    pd.inventoryConfigured = true;
+
+                    this.playerData.set(debugEntity.nameTag, pd);
                     this.runners.push(debugEntity.nameTag);
                 }
             }
@@ -312,25 +312,11 @@ export class TagGame {
             });
         }
 
-        if (this.itemUseOnBeforeEventHandle === undefined) {
-            Logger.debug("subscribing to itemUseOnBefore event", player);
-            this.itemUseOnBeforeEventHandle = world.beforeEvents.itemUseOn.subscribe(eventData => {
-                const player = eventData.source;
-                player.sendMessage("## itemUseOn ##");
+        // if (false) {
+        //     world.afterEvents.entityHitEntity.subscribe(eventData => {
 
-                if (this.isTargetItemType(player, eventData.itemStack, MinecraftItemTypes.BlazeRod)) {
-                    eventData.cancel = true;
-                    system.run(() => {
-                        if (player.isSneaking) {
-                            this.setNextTargetPlayer(player);
-                        }
-                        else {
-                            this.locateTargetEntity(player);
-                        }
-                    });
-                }
-            });
-        }
+        //     });
+        // }
 
         if (this.playerLeaveAfterEventHandle === undefined) {
             Logger.debug("subscribing to playerLeaveAfter event", player);
@@ -365,11 +351,6 @@ export class TagGame {
             this.itemUseBeforeEventHandle = undefined;
         }
 
-        if (this.itemUseOnBeforeEventHandle !== undefined) {
-            world.beforeEvents.itemUseOn.unsubscribe(this.itemUseOnBeforeEventHandle);
-            this.itemUseOnBeforeEventHandle = undefined;
-        }
-
         if (this.playerLeaveAfterEventHandle !== undefined) {
             world.afterEvents.playerLeave.unsubscribe(this.playerLeaveAfterEventHandle);
             this.playerLeaveAfterEventHandle = undefined;
@@ -386,8 +367,15 @@ export class TagGame {
         }, 20);
     }
 
+    private cleanupBackgroundActions() {
+        if (this.targetPlayerPrintHandle !== undefined) {
+            system.clearRun(this.targetPlayerPrintHandle);
+            this.targetPlayerPrintHandle = undefined;
+        }
+    }
+
     private isTargetItemType(player: Player, itemStack: ItemStack, targetItemType: string): boolean {
-        if (player.hasTag("cmd")) {
+        if (player.hasTag("debugUser")) {
             Logger.debug(`${player.name} interacted with ${itemStack.typeId}`, player);
         }
 
@@ -395,30 +383,47 @@ export class TagGame {
         return retVal;
     }
 
-    private getSortedPlayerNames(): string[] {
-        const playerNames = Array.from(this.playerData.keys()).sort((k1, k2) => {
+    private getSortedPlayerNames(playerNames?: string[]): string[] {
+        if (playerNames === undefined) {
+            playerNames = Array.from(this.playerData.keys());
+        }
+
+        const sortedNames = playerNames.sort((k1, k2) => {
             if (k1 > k2) return 1;
             if (k1 < k2) return -1;
             return 0;
         });
-        return playerNames;
+        return sortedNames;
     }
 
     private setNextTargetPlayer(player: Player) {
         const playerData = this.playerData.get(player.name);
-        //Logger.debug(`Player data: ${JSON.stringify(playerData)}`);
-        let availablePlayerNames = this.getSortedPlayerNames().filter(pn => {
-            if (pn === player.name) return false;
-            if (playerData.targetPlayerName !== undefined) {
-                if (pn === playerData.targetPlayerName) return false;
-            }
-            return true;
-        });
-        //Logger.debug(`availablePlayerNames: ${JSON.stringify(availablePlayerNames)}`);
 
-        const nextPlayerName = availablePlayerNames.shift();
-        Logger.debug(`${nextPlayerName}. playerNames = ${availablePlayerNames.join(",")}`, player);
-        playerData.targetPlayerName = nextPlayerName;
+        let availablePlayerNames = this.getSortedPlayerNames(this.runners);
+        if (availablePlayerNames !== undefined && availablePlayerNames.length > 0) {
+            for (let i = 0; i < availablePlayerNames.length; i++) {
+                // if the current target is undefined, used the current item
+                if (playerData.targetPlayerName === undefined) {
+                    playerData.targetPlayerName = availablePlayerNames[0];
+                    break;
+                }
+
+                // if we found the current target:
+                //   a) and the item is the last item in the list, then select the first item
+                //   b) otherwise select the next item
+                if (playerData.targetPlayerName === availablePlayerNames[i]) {
+                    playerData.targetPlayerName = (i < availablePlayerNames.length - 1)
+                        ? availablePlayerNames[i + 1]
+                        : availablePlayerNames[0];
+                    break;
+                }
+            };
+
+            Logger.debug(`${playerData.targetPlayerName}. playerNames = ${availablePlayerNames.join(",")}`, player);
+        }
+        else {
+            Logger.error(`No runners to target. Runners: ${this.runners.join(",")}`);
+        }
     }
 
     private getTrackedEntityLocation(player: Player): Vector3Wrapper {

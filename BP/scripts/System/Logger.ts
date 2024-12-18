@@ -6,13 +6,13 @@ export class Logger {
 
     static debug(message: string, player?: Player) {
         if (Logger.IN_DEBUG_MODE) {
-            const msg = `${ChatColorCodes.gray}[${system.currentTick}]${message}`;
+            const msg = `${ChatColorCodes.gray}[${system.currentTick}] ${message}`;
             Logger.print(msg, player);
         }
     }
 
     static error(message: string, player?: Player) {
-        const msg = `${ChatColorCodes.red}[${system.currentTick}]${message}`;
+        const msg = `${ChatColorCodes.red}[${system.currentTick}] ${message}`;
         Logger.print(msg, player);
     }
 
