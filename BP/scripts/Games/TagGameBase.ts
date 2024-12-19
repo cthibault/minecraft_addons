@@ -1,4 +1,5 @@
-import { world, system, Entity, Player, ItemStack, EntityInventoryComponent, ItemUseBeforeEvent, ItemUseOnBeforeEvent, PlayerLeaveAfterEvent, EntityQueryOptions, MolangVariableMap, RawMessage } from "@minecraft/server";
+
+import { world, system, Entity, Player, ScoreboardObjective, DisplaySlotId, ObjectiveSortOrder, DimensionLocation, ItemStack, ItemLockMode, EntityInventoryComponent, ItemUseBeforeEvent, EntityHitEntityAfterEvent, PlayerLeaveAfterEvent, EntityQueryOptions, MolangVariableMap, RawMessage } from "@minecraft/server";
 import { MinecraftEntityTypes, MinecraftItemTypes } from "../Helpers/vanilla-data.js";
 import { TagArea } from "./TagArea";
 import { Vector3Wrapper } from "../System/Vector3Wrapper.js"
@@ -53,6 +54,7 @@ export enum TagGameStates {
 class TagGameRules {
     becomeTaggerOnDeath: boolean = false;
     taggerSpeedBuffIntervalInSeconds: number = 0;
+    teleportOnTag: boolean = true;
 }
 
 class PlayerData {
@@ -62,6 +64,7 @@ class PlayerData {
     inventoryConfigured: boolean = false;
     targetPlayerName: string = undefined;
     taggerCount: number = 0;
+    tagTimeInSeconds: number = 0;
 
     //TODO: how to get duration of them being a tagger?
     taggerStartTime: number = 0;
@@ -94,6 +97,17 @@ interface InventoryItem {
 }
 
 export class TagGame {
+    private readonly FINDER: ItemStack;
+    private readonly TAGTIME_SCOREBOARD_ID: string = "tagtime_score";
+    private readonly TAGCOUNT_SCOREBOARD_ID: string = "tagcount_score";
+
+    private readonly tagTimeScoreboard: ScoreboardObjective = null;
+    private readonly tagCountScoreboard: ScoreboardObjective = null;
+
+    // TODO: replace after TagArea integration
+    private spawnLocation: DimensionLocation = undefined;
+    // TODO
+
     private tagArea: TagArea;
     private mode: TagGameModes;
     private rules: TagGameRules;
@@ -106,8 +120,9 @@ export class TagGame {
     private playerData: Map<string, PlayerData>;
 
     private itemUseBeforeEventHandle: (arg: ItemUseBeforeEvent) => void;
+    private entityHitEntityEventHandle: (arg: EntityHitEntityAfterEvent) => void;
     private playerLeaveAfterEventHandle: (arg: PlayerLeaveAfterEvent) => void;
-    private targetPlayerPrintHandle: number = undefined;
+    private taggerGameLoopHandle: number = undefined;
 
     constructor() {
         this.tagArea = new TagArea();
@@ -120,10 +135,27 @@ export class TagGame {
 
         // Initialize the player data
         this.playerData = new Map();
+
+        this.FINDER = new ItemStack(MinecraftItemTypes.BlazeRod, 1);
+        this.FINDER.nameTag = "finder"
+
+        this.tagTimeScoreboard = world.scoreboard.getObjective(this.TAGTIME_SCOREBOARD_ID);
+        if (!this.tagTimeScoreboard) {
+            this.tagTimeScoreboard = world.scoreboard.addObjective(this.TAGTIME_SCOREBOARD_ID, "Tag Time (/30s)");
+        }
+
+        this.tagCountScoreboard = world.scoreboard.getObjective(this.TAGCOUNT_SCOREBOARD_ID);
+        if (!this.tagCountScoreboard) {
+            this.tagCountScoreboard = world.scoreboard.addObjective(this.TAGCOUNT_SCOREBOARD_ID, "Tag Count");
+        }
     }
 
     public get gameState(): TagGameStates {
         return this.state;
+    }
+
+    public get gameTagArea(): TagArea {
+        return this.tagArea;
     }
 
     public getDataJson(options?: TagGameJsonDataOptions): string {
@@ -135,11 +167,6 @@ export class TagGame {
 
     // Exclude some of the data from the toString result
     private jsonReplacer(key: string, value, options?: TagGameJsonDataOptions) {
-        const getRegisteredState = (input: any): string => {
-            if (input === undefined) return "Unregistered";
-            return "Registered";
-        }
-
         switch (key) {
             case "playerData":
                 if (!options?.includePlayerData) {
@@ -158,9 +185,12 @@ export class TagGame {
                 return value;
 
             case "itemUseBeforeEventHandle":
-                return getRegisteredState(this.itemUseBeforeEventHandle);
+            case "entityHitEntityEventHandle":
             case "playerLeaveAfterEventHandle":
-                return getRegisteredState(this.playerLeaveAfterEventHandle);
+                const result = value !== undefined
+                    ? "REGISTERED"
+                    : "UNREGISTERED";
+                return result;
 
             default:
                 return value;
@@ -175,7 +205,7 @@ export class TagGame {
         if (this.initOptions === undefined) {
             this.initOptions = {
                 clearPlayerInventories: true,
-                defaultTaggerName: undefined,
+                defaultTaggerName: "nulkref", //TODO: undefined,
                 tagAreaSideLength: 100,
                 defaultInventoryItems: []
             };
@@ -184,7 +214,7 @@ export class TagGame {
             var inventory = playerActor.getInventory();
             for (let i = 0; i < inventory.inventorySize; i++) {
                 const itemStack = inventory.container.getItem(i);
-                if (itemStack !== undefined) {
+                if (itemStack !== undefined && itemStack.nameTag !== this.FINDER.nameTag) {
                     this.initOptions.defaultInventoryItems.push({
                         amount: itemStack.amount,
                         typeId: itemStack.typeId
@@ -193,6 +223,14 @@ export class TagGame {
             }
         }
 
+        this.spawnLocation = {
+            dimension: player.dimension,
+            x: player.location.x,
+            y: player.location.y,
+            z: player.location.z
+        };
+
+        this.initScoreboards(player);
         this.initPlayers(player);
         this.subscribeToEvents(player);
         this.setupBackgroundActions();
@@ -205,6 +243,36 @@ export class TagGame {
 
         this.unsubscribeFromEvents();
         this.cleanupBackgroundActions();
+    }
+
+    private initScoreboards(player: Player) {
+        // initialize Tag Count scoreboard
+        Logger.debug(`Init scoreboard: tagCountScoreboard`, player);
+        this.tagCountScoreboard.getParticipants().forEach(participant => {
+            Logger.debug(`  removing ${participant}`, player);
+            this.tagCountScoreboard.removeParticipant(participant);
+        });
+
+        world.scoreboard.setObjectiveAtDisplaySlot(
+            DisplaySlotId.List,
+            {
+                objective: this.tagCountScoreboard,
+                sortOrder: ObjectiveSortOrder.Ascending
+            });
+
+        // initialize Tag Time scoreboard
+        Logger.debug(`Init scoreboard: tagTimeScoreboard`, player);
+        this.tagTimeScoreboard.getParticipants().forEach(participant => {
+            Logger.debug(`  removing ${participant}`, player);
+            this.tagTimeScoreboard.removeParticipant(participant);
+        })
+
+        world.scoreboard.setObjectiveAtDisplaySlot(
+            DisplaySlotId.Sidebar,
+            {
+                objective: this.tagTimeScoreboard,
+                sortOrder: ObjectiveSortOrder.Ascending
+            });
     }
 
     private initPlayers(player: Player) {
@@ -264,13 +332,15 @@ export class TagGame {
 
                 // Tagger inventory
                 if (playerData.isTagger) {
-                    const finder = new ItemStack(MinecraftItemTypes.BlazeRod, 1);
-                    finder.nameTag = "finder";
-                    inventory.container.addItem(finder);
+                    inventory.container.addItem(this.buildFinderItemStack());
                 }
 
                 playerData.inventoryConfigured = true;
             }
+
+            this.tagCountScoreboard.addScore(playerData.playerActor.player, 0);
+            this.tagTimeScoreboard.addScore(playerData.playerActor.player, 0);
+            playerData.playerActor.player.setSpawnPoint(this.spawnLocation);
         });
 
         //TODO: For debugging, needs to be removed
@@ -298,7 +368,7 @@ export class TagGame {
             this.itemUseBeforeEventHandle = world.beforeEvents.itemUse.subscribe(eventData => {
                 const player = eventData.source;
 
-                if (this.isTargetItemType(player, eventData.itemStack, MinecraftItemTypes.BlazeRod)) {
+                if (this.isTargetItemType(player, eventData.itemStack, this.FINDER)) {
                     eventData.cancel = true;
                     system.run(() => {
                         if (player.isSneaking) {
@@ -312,11 +382,70 @@ export class TagGame {
             });
         }
 
-        // if (false) {
-        //     world.afterEvents.entityHitEntity.subscribe(eventData => {
+        if (this.entityHitEntityEventHandle === undefined) {
+            Logger.debug("subscribing to entityHitEntity event", player);
+            this.entityHitEntityEventHandle = world.afterEvents.entityHitEntity.subscribe(eventData => {
+                Logger.debug("Tagger needs to change!")
+                Logger.debug(`## EntityHitEntity event: \n   HEntity: (${eventData.hitEntity.typeId}, ${eventData.hitEntity.nameTag}) \n   DEntity: (${eventData.damagingEntity.typeId}, ${eventData.damagingEntity.nameTag})`);
 
-        //     });
-        // }
+                // was the damaging entity a tagger and the hit entity a runner?
+                const taggingPlayerData = this.playerData.get(eventData.damagingEntity.nameTag);
+                const taggedPlayerData = this.playerData.get(eventData.hitEntity.nameTag);
+
+                if (taggingPlayerData.isTagger && !taggedPlayerData.isTagger) {
+                    try {
+                        // you caught 'em!
+                        // - update player data object
+                        // - remove the finder item from inventory
+                        taggingPlayerData.isTagger = false;
+                        taggingPlayerData.targetPlayerName = undefined;
+                        const inventoryA = taggingPlayerData.playerActor.getInventory();
+                        for (let i = 0; i < inventoryA.inventorySize; i++) {
+                            const item = inventoryA.container.getItem(i);
+                            if (item !== undefined && item.nameTag === this.FINDER.nameTag) {
+                                Logger.debug(`Item in slot ${i}: ${item?.amount} x ${item?.typeId} w/ name ${item?.nameTag}`);
+                                inventoryA.container.setItem(i, undefined);
+                            }
+                        }
+
+                        // you've been caught
+                        // - update player data object
+                        // - remove the finder item from inventory
+                        // - TP them to the center of the tag area
+                        taggedPlayerData.isTagger = true;
+                        taggedPlayerData.taggerCount++;
+                        this.incrementScore(this.tagCountScoreboard, taggedPlayerData.playerActor.player);
+                        const inventoryB = taggedPlayerData.playerActor.getInventory();
+                        inventoryB.container.addItem(this.buildFinderItemStack());
+
+                        // Update Tagger and Runner lists
+                        const runnerIdx = this.runners.indexOf(taggedPlayerData.playerName);
+                        if (runnerIdx >= 0) {
+                            this.runners[runnerIdx] = taggingPlayerData.playerName;
+                        }
+
+                        const taggerIdx = this.taggers.indexOf(taggingPlayerData.playerName);
+                        if (taggerIdx >= 0) {
+                            this.taggers[taggerIdx] = taggedPlayerData.playerName;
+                        }
+
+                        Logger.debug(`Tagger changed to ${taggedPlayerData.playerName}`);
+
+                        taggedPlayerData.playerActor.player.teleport({
+                            x: this.spawnLocation.x,
+                            y: this.spawnLocation.y,
+                            z: this.spawnLocation.z
+                        });
+                    }
+                    catch (error) {
+                        Logger.error(`entityHitEntity error: ${typeof error}. Error: ${error}`);
+                        console.error(`TagArea.build failed.Type: ${typeof error}. Error: ${error}`);
+                    }
+                }
+            }, {
+                entityTypes: [MinecraftEntityTypes.Player]
+            });
+        }
 
         if (this.playerLeaveAfterEventHandle === undefined) {
             Logger.debug("subscribing to playerLeaveAfter event", player);
@@ -351,6 +480,11 @@ export class TagGame {
             this.itemUseBeforeEventHandle = undefined;
         }
 
+        if (this.entityHitEntityEventHandle !== undefined) {
+            world.afterEvents.entityHitEntity.unsubscribe(this.entityHitEntityEventHandle);
+            this.entityHitEntityEventHandle = undefined;
+        }
+
         if (this.playerLeaveAfterEventHandle !== undefined) {
             world.afterEvents.playerLeave.unsubscribe(this.playerLeaveAfterEventHandle);
             this.playerLeaveAfterEventHandle = undefined;
@@ -358,28 +492,62 @@ export class TagGame {
     }
 
     private setupBackgroundActions() {
-        this.targetPlayerPrintHandle = system.runInterval(() => {
-            this.playerData.forEach(pd => {
-                if (pd.targetPlayerName !== undefined) {
-                    pd.playerActor.player.onScreenDisplay.setActionBar(pd.targetPlayerName);
-                }
-            })
-        }, 20);
-    }
+        if (this.taggerGameLoopHandle === undefined) {
+            this.taggerGameLoopHandle = system.runInterval(() => {
+                this.taggers.forEach(name => {
+                    const playerData = this.playerData.get(name);
+                    playerData.tagTimeInSeconds++;
 
-    private cleanupBackgroundActions() {
-        if (this.targetPlayerPrintHandle !== undefined) {
-            system.clearRun(this.targetPlayerPrintHandle);
-            this.targetPlayerPrintHandle = undefined;
+                    // Action Bar label
+                    const trackingText = playerData?.targetPlayerName ?? "<no one>";
+                    const tagTimeText = `${Math.floor(playerData.tagTimeInSeconds / 60)}:${(playerData.tagTimeInSeconds % 60).toString().padStart(2, "0")}`
+
+                    playerData.playerActor.player.onScreenDisplay.setActionBar(`Tracking: ${trackingText}\nTag Time: ${tagTimeText} [${playerData.tagTimeInSeconds}]`);
+
+                    // Scoreboard
+                    // Increment score every 30 seconds
+                    if (playerData.tagTimeInSeconds > 0 && playerData.tagTimeInSeconds % 30 === 0) {
+                        this.incrementScore(this.tagTimeScoreboard, playerData.playerActor.player);
+                    }
+                });
+            }, 20);
         }
     }
 
-    private isTargetItemType(player: Player, itemStack: ItemStack, targetItemType: string): boolean {
+    private incrementScore(scoreboard: ScoreboardObjective, player: Player) {
+        if (!scoreboard) return;
+
+        try {
+            const currentScore = scoreboard.getScore(player);
+            scoreboard.setScore(player, currentScore + 1);
+        }
+        catch (error) {
+            Logger.error(`entityHitEntity error: ${typeof error}. Error: ${error}`);
+            console.error(`TagArea.build failed.Type: ${typeof error}. Error: ${error}`);
+        }
+    }
+
+    private cleanupBackgroundActions() {
+        if (this.taggerGameLoopHandle !== undefined) {
+            system.clearRun(this.taggerGameLoopHandle);
+            this.taggerGameLoopHandle = undefined;
+        }
+    }
+
+    private buildFinderItemStack(): ItemStack {
+        const finder = new ItemStack(MinecraftItemTypes.BlazeRod, 1);
+        finder.nameTag = this.FINDER.nameTag;
+        finder.keepOnDeath = true;
+        finder.lockMode = ItemLockMode.inventory;
+        return finder;
+    }
+
+    private isTargetItemType(player: Player, itemStack: ItemStack, targetItemStack: ItemStack): boolean {
         if (player.hasTag("debugUser")) {
             Logger.debug(`${player.name} interacted with ${itemStack.typeId}`, player);
         }
 
-        const retVal = itemStack.typeId === targetItemType;
+        const retVal = itemStack.typeId === targetItemStack.typeId && itemStack.nameTag === targetItemStack.nameTag;
         return retVal;
     }
 
