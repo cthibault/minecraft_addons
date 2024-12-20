@@ -64,10 +64,8 @@ class PlayerData {
     inventoryConfigured: boolean = false;
     targetPlayerName: string = undefined;
     taggerCount: number = 0;
-    tagTimeInSeconds: number = 0;
-
-    //TODO: how to get duration of them being a tagger?
-    taggerStartTime: number = 0;
+    tagTimeInSecondsActive: number = 0;
+    tagTimeInSecondsTotal: number = 0;
 
     constructor(playerName: string) {
         this.playerName = playerName;
@@ -76,6 +74,11 @@ class PlayerData {
     setPlayerActor(playerActor: PlayerActor): PlayerData {
         this.playerActor = playerActor;
         return this;
+    }
+
+    incrementTagTime() {
+        this.tagTimeInSecondsTotal++;
+        this.tagTimeInSecondsActive++;
     }
 }
 
@@ -167,6 +170,11 @@ export class TagGame {
 
     // Exclude some of the data from the toString result
     private jsonReplacer(key: string, value, options?: TagGameJsonDataOptions) {
+        // const getRegisteredState = (input: any): string => {
+        //     if (input === undefined) return "Unregistered";
+        //     return "Registered";
+        // }
+
         switch (key) {
             case "playerData":
                 if (!options?.includePlayerData) {
@@ -399,6 +407,7 @@ export class TagGame {
                         // - remove the finder item from inventory
                         taggingPlayerData.isTagger = false;
                         taggingPlayerData.targetPlayerName = undefined;
+                        taggingPlayerData.tagTimeInSecondsActive = 0;
                         const inventoryA = taggingPlayerData.playerActor.getInventory();
                         for (let i = 0; i < inventoryA.inventorySize; i++) {
                             const item = inventoryA.container.getItem(i);
@@ -470,6 +479,8 @@ export class TagGame {
                 if (runnerIdx >= 0) {
                     this.taggers.splice(taggerIdx, 1);
                 }
+
+                // TODO: remove them from the scoreboard?
             });
         }
     }
@@ -496,19 +507,25 @@ export class TagGame {
             this.taggerGameLoopHandle = system.runInterval(() => {
                 this.taggers.forEach(name => {
                     const playerData = this.playerData.get(name);
-                    playerData.tagTimeInSeconds++;
+                    playerData.incrementTagTime();
 
                     // Action Bar label
                     const trackingText = playerData?.targetPlayerName ?? "<no one>";
-                    const tagTimeText = `${Math.floor(playerData.tagTimeInSeconds / 60)}:${(playerData.tagTimeInSeconds % 60).toString().padStart(2, "0")}`
+                    const tagTimeText = `${Math.floor(playerData.tagTimeInSecondsActive / 60)}:${(playerData.tagTimeInSecondsActive % 60).toString().padStart(2, "0")}`;
 
-                    playerData.playerActor.player.onScreenDisplay.setActionBar(`Tracking: ${trackingText}\nTag Time: ${tagTimeText} [${playerData.tagTimeInSeconds}]`);
+                    playerData.playerActor.player.onScreenDisplay.setActionBar(`Tracking: ${trackingText}\nTag Time: ${tagTimeText}`);
 
                     // Scoreboard
                     // Increment score every 30 seconds
-                    if (playerData.tagTimeInSeconds > 0 && playerData.tagTimeInSeconds % 30 === 0) {
+                    if (playerData.tagTimeInSecondsActive > 0 && playerData.tagTimeInSecondsActive % 30 === 0) {
                         this.incrementScore(this.tagTimeScoreboard, playerData.playerActor.player);
                     }
+                });
+
+                const taggerLabel = this.taggers.join(",");
+                this.runners.forEach(name => {
+                    const playerData = this.playerData.get(name);
+                    playerData.playerActor.player.onScreenDisplay.setActionBar(`Tagger: ${taggerLabel}`);
                 });
             }, 20);
         }

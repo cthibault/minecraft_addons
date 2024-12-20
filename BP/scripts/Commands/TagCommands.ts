@@ -1,6 +1,7 @@
 import { Player, world, system } from "@minecraft/server";
-import ChatCommand from './CommandDefinition.js'
-import { TagArea } from "../Games/TagArea.js"
+//import ChatCommand from './CommandDefinition.js'
+import MyChatCommand from './MyChatCommand.js'
+import { ChatComandExecutionOptions, ChatCommandBuilder } from './MyChatCommand.js'
 import { TagGame, TagGameStates, TagGameJsonDataOptions } from "../Games/TagGameBase.js"
 import { ChatColorCodes } from "../System/ChatCodes.js"
 
@@ -11,37 +12,70 @@ function isTagAdmin(player: Player): boolean {
     return isAdmin;
 }
 
-ChatCommand.create('StartGame', 'Start Tag Game', ['ts'], undefined, isTagAdmin, (player, args) => {
-    player.sendMessage(`StartGame command received...`);
-    system.run(() => {
-        if (game !== null) {
-            player.sendMessage(`  Start Game...`);
-            game.start(player);
-        }
+MyChatCommand.register(
+    new ChatCommandBuilder('StartGame')
+        .withDescription('Start a new game of tag')
+        .withPermissions(['tagAdmin'])
+        .withGroup("tag")
+        .withAliases(['ts'])
+        .build(),
+    (options: ChatComandExecutionOptions) => {
+        options.player.sendMessage(`StartGame command received...`);
+        system.run(() => {
+            if (game !== null) {
+                options.player.sendMessage(`  Start Game...`);
+                game.start(options.player);
+            }
+        });
     });
-});
 
-ChatCommand.create('StopGame', 'Stop Tag Game', ['tstop'], undefined, isTagAdmin, (player, args) => {
-    player.sendMessage(`StopGame command received...`);
-    system.run(() => {
-        if (game !== null) {
-            player.sendMessage(`  Stop Game...`);
-            game.stop();
-        }
+MyChatCommand.register(
+    new ChatCommandBuilder('StopGame')
+        .withDescription('Start a new game of tag')
+        .withPermissions(['tagAdmin'])
+        .withGroup("tag")
+        .withAliases(['tstop'])
+        .build(),
+    (options: ChatComandExecutionOptions) => {
+        options.player.sendMessage(`StopGame command received...`);
+        system.run(() => {
+            if (game !== null) {
+                options.player.sendMessage(`  Stop Game...`);
+                game.stop();
+            }
+        });
     });
-});
 
-ChatCommand.create('GetGameData', 'Get Game Data', ['td'], { 'includePlayerData': 'boolean', 'includeTagArea': 'boolean' }, isTagAdmin, (player, args) => {
-    player.sendMessage(`GetGameData command received...`);
-    system.run(() => {
-        if (game !== null) {
-            player.sendMessage(`${ChatColorCodes.gray}${game.getDataJson({
-                includePlayerData: args['includePlayerData'],
-                includeTagArea: args['includeTagArea'],
-            })}`);
-        }
+MyChatCommand.register(
+    new ChatCommandBuilder('GetGameData')
+        .withDescription('Dump the game data for the current game of tag')
+        .withPermissions(['tagAdmin'])
+        .withGroup("tag")
+        .withAliases(['td'])
+        .withArgumentSet({
+            name: "default",
+            arguments: []
+        })
+        .withArgumentSet({
+            name: "explicit",
+            arguments: [
+                { name: "includePlayerData", type: "boolean", description: "flag indicating the player data should be included in the output" },
+                { name: "includeTagArea", type: "boolean", description: "flag indicating tag area data should be included in the output" },
+            ]
+        })
+        .build(),
+    (options: ChatComandExecutionOptions) => {
+        options.player.sendMessage(`GetGameData command received...`);
+        system.run(() => {
+            if (game !== null) {
+                options.player.sendMessage(`${ChatColorCodes.gray}${game.getDataJson({
+                    includePlayerData: options.parsedArgs?.includePlayerData ?? true,
+                    includeTagArea: options.parsedArgs?.includeTagArea ?? true,
+                })}`);
+            }
+        });
     });
-});
+
 
 ChatCommand.create('BuildBorder', 'Build the boarder', ['bb'], { 'sideLength': 'number' }, isTagAdmin, (player, args) => {
     player.sendMessage(`Build boarder command received...`);
