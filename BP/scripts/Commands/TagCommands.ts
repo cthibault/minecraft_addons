@@ -1,7 +1,6 @@
 import { Player, world, system } from "@minecraft/server";
 //import ChatCommand from './CommandDefinition.js'
-import MyChatCommand from './MyChatCommand.js'
-import { ChatComandExecutionOptions, ChatCommandBuilder } from './MyChatCommand.js'
+import { ChatCommandExecutionOptions, ChatCommandBuilder, ChatCommandManager, ChatCommands } from './MyChatCommand.js'
 import { TagGame, TagGameStates, TagGameJsonDataOptions } from "../Games/TagGameBase.js"
 import { ChatColorCodes } from "../System/ChatCodes.js"
 
@@ -12,14 +11,14 @@ function isTagAdmin(player: Player): boolean {
     return isAdmin;
 }
 
-MyChatCommand.register(
+ChatCommands.register(
     new ChatCommandBuilder('StartGame')
         .withDescription('Start a new game of tag')
         .withPermissions(['tagAdmin'])
         .withGroup("tag")
         .withAliases(['ts'])
         .build(),
-    (options: ChatComandExecutionOptions) => {
+    (options: ChatCommandExecutionOptions) => {
         options.player.sendMessage(`StartGame command received...`);
         system.run(() => {
             if (game !== null) {
@@ -29,14 +28,14 @@ MyChatCommand.register(
         });
     });
 
-MyChatCommand.register(
+ChatCommands.register(
     new ChatCommandBuilder('StopGame')
         .withDescription('Start a new game of tag')
         .withPermissions(['tagAdmin'])
         .withGroup("tag")
         .withAliases(['tstop'])
         .build(),
-    (options: ChatComandExecutionOptions) => {
+    (options: ChatCommandExecutionOptions) => {
         options.player.sendMessage(`StopGame command received...`);
         system.run(() => {
             if (game !== null) {
@@ -46,25 +45,19 @@ MyChatCommand.register(
         });
     });
 
-MyChatCommand.register(
+ChatCommands.register(
     new ChatCommandBuilder('GetGameData')
         .withDescription('Dump the game data for the current game of tag')
         .withPermissions(['tagAdmin'])
         .withGroup("tag")
         .withAliases(['td'])
-        .withArgumentSet({
-            name: "default",
-            arguments: []
-        })
-        .withArgumentSet({
-            name: "explicit",
-            arguments: [
-                { name: "includePlayerData", type: "boolean", description: "flag indicating the player data should be included in the output" },
-                { name: "includeTagArea", type: "boolean", description: "flag indicating tag area data should be included in the output" },
-            ]
-        })
+        .withArgument({ name: "includePlayerData", type: "boolean", description: "flag indicating the player data should be included in the output" })
+        .withArgument({ name: "includeTagArea", type: "boolean", description: "flag indicating tag area data should be included in the output" })
+        .withEmptyArgumentSet()
+        .withCompleteArgumentSet()
+        .withArgumentSet({ name: "abc", argumentNamesInOrder: ["includePlayerData"] })
         .build(),
-    (options: ChatComandExecutionOptions) => {
+    (options: ChatCommandExecutionOptions) => {
         options.player.sendMessage(`GetGameData command received...`);
         system.run(() => {
             if (game !== null) {

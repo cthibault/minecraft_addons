@@ -1,7 +1,6 @@
-import { Player, world, system } from "@minecraft/server";
+	import { Player, world, system } from "@minecraft/server";
 import ChatCommand from './CommandDefinition.js'
-import MyChatCommand from './MyChatCommand.js'
-import { Argument, ArgumentSet, ChatComandExecutionOptions, ChatCommandBuilder, ChatCommandProps } from './MyChatCommand.js'
+import { ChatCommandExecutionOptions, ChatCommandBuilder, ChatCommandManager, ChatCommands } from './MyChatCommand.js'
 
 ChatCommand.create('test', 'test', ['t'], undefined, false, (player, args) => {
     player.sendMessage(`test command received...`);
@@ -25,19 +24,14 @@ ChatCommand.create('test', 'test', ['t2'], { "name": "string" }, false, (player,
     });
 });
 
-MyChatCommand.register(
+ChatCommands.register(
     new ChatCommandBuilder('MyTest')
         .withDescription('sample test command')
         .withAliases(['myt'])
-        .withArgumentSet({
-            name: "default",
-            arguments: [
-                { name: "age", type: "number", description: "only argument" },
-                { name: "name", type: "string", description: "only argument" },
-                { name: "inSchool", type: "boolean", description: "only argument" },
-            ]
-        })
+        .withArgument({ name: "age", type: "number", defaultValue: 10, description: "some age value" })
+        .withArgument({ name: "age2", type: "number", defaultValue: 10, description: "some age value" })
         .build(),
-    (options: ChatComandExecutionOptions) => {
+    (options: ChatCommandExecutionOptions) => {
         options.player.sendMessage("I made it");
+        options.player.sendMessage(JSON.stringify(options, null, 2));
     });
