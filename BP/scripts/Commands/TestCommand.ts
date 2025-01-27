@@ -1,37 +1,31 @@
-	import { Player, world, system } from "@minecraft/server";
-import ChatCommand from './CommandDefinition.js'
-import { ChatCommandExecutionOptions, ChatCommandBuilder, ChatCommandManager, ChatCommands } from './MyChatCommand.js'
-
-ChatCommand.create('test', 'test', ['t'], undefined, false, (player, args) => {
-    player.sendMessage(`test command received...`);
-
-    system.run(() => {
-        const message: string = "test command received";
-        player.onScreenDisplay.setActionBar([{
-            text: message
-        }]);
-    });
-});
-
-ChatCommand.create('test', 'test', ['t2'], { "name": "string" }, false, (player, args) => {
-    player.sendMessage(`test command received...`);
-
-    system.run(() => {
-        const message: string = `test command received:\n  ${args["name"]}`;
-        player.onScreenDisplay.setActionBar([{
-            text: message
-        }]);
-    });
-});
+import { Player, world, system, EntityComponentTypes, ItemStack, DisplaySlotId } from "@minecraft/server";
+import { ChatCommandExecutionOptions, ChatCommandBuilder, ChatCommands } from './ChatCommands.js'
+import { MinecraftEntityTypes, MinecraftItemTypes } from "../Helpers/vanilla-data.js";
 
 ChatCommands.register(
-    new ChatCommandBuilder('MyTest')
+    new ChatCommandBuilder('TestCommand')
         .withDescription('sample test command')
-        .withAliases(['myt'])
+        .withAliases(['tc'])
+        .withGroup("test")
         .withArgument({ name: "age", type: "number", defaultValue: 10, description: "some age value" })
-        .withArgument({ name: "age2", type: "number", defaultValue: 10, description: "some age value" })
         .build(),
     (options: ChatCommandExecutionOptions) => {
-        options.player.sendMessage("I made it");
-        options.player.sendMessage(JSON.stringify(options, null, 2));
+        system.run(() => {
+            world.scoreboard.clearObjectiveAtDisplaySlot(DisplaySlotId.Sidebar);
+        });
+        // const c1 = options.player.getComponent(EntityComponentTypes.Health);
+        // options.player.sendMessage(`My health is: ${c1.currentValue}`);
+
+        // const components = options.player.getComponents();
+        // options.player.sendMessage("Components:");
+        // components.forEach(c => options.player.sendMessage(`  ${c.typeId}`));
+        // options.player.sendMessage("DynamicProperties:");
+        // options.player.getDynamicPropertyIds().forEach(p => options.player.sendMessage(`  ${p}`));
+
+        // system.run(() => {
+        //     const beef = new ItemStack(MinecraftItemTypes.CookedBeef, 1);
+
+
+        //     options.player.eatItem(beef);
+        // });
     });

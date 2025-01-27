@@ -1,43 +1,11 @@
 
-import { world, system, Entity, Player, ScoreboardObjective, DisplaySlotId, ObjectiveSortOrder, DimensionLocation, ItemStack, ItemLockMode, EntityInventoryComponent, ItemUseBeforeEvent, EntityHitEntityAfterEvent, PlayerLeaveAfterEvent, EntityQueryOptions, MolangVariableMap, RawMessage } from "@minecraft/server";
+import { world, system, Entity, Player, ScoreboardObjective, DisplaySlotId, ObjectiveSortOrder, DimensionLocation, ItemStack, ItemLockMode, EntityInventoryComponent, ItemUseBeforeEvent, EntityHitEntityAfterEvent, EntityDieAfterEvent, PlayerSpawnAfterEvent, PlayerLeaveAfterEvent, EntityQueryOptions, MolangVariableMap, RawMessage } from "@minecraft/server";
 import { MinecraftEntityTypes, MinecraftItemTypes } from "../Helpers/vanilla-data.js";
+import { PlayerActor } from "../Helpers/PlayerHelpers.js"
 import { TagArea } from "./TagArea";
 import { Vector3Wrapper } from "../System/Vector3Wrapper.js"
 import { Logger } from "../System/Logger.js"
 import { MathUtils } from "../System/MathUtils.js"
-
-class PlayerActor {
-    player: Player;
-
-    constructor(player: Player) {
-        this.player = player;
-    }
-
-    getName(): string {
-        return this.player.name;
-    }
-
-    hasTag(name: string): boolean {
-        return this.player.hasTag(name);
-    }
-
-    getTags(): string[] {
-        return this.player.getTags();
-    }
-
-    addTag(name: string): boolean {
-        return this.player.addTag(name);
-    }
-
-    getInventory(): EntityInventoryComponent {
-        return this.player.getComponent("inventory");
-    }
-
-    setActionBarText(text: string) {
-        if (text === undefined) return;
-        this.player.onScreenDisplay.setActionBar(text)
-    }
-}
 
 enum TagGameModes {
     Standard = "STANDARD",
@@ -88,10 +56,10 @@ export interface TagGameJsonDataOptions {
 }
 
 export interface TagGameInitOptions {
-    clearPlayerInventories: boolean;
-    defaultTaggerName: string;
-    tagAreaSideLength: number,
-    defaultInventoryItems: InventoryItem[];
+    clearPlayerInventories?: boolean;
+    defaultTaggerName?: string;
+    tagAreaSideLength?: number,
+    defaultInventoryItems?: InventoryItem[];
 }
 
 interface InventoryItem {
@@ -125,6 +93,8 @@ export class TagGame {
     private itemUseBeforeEventHandle: (arg: ItemUseBeforeEvent) => void;
     private entityHitEntityEventHandle: (arg: EntityHitEntityAfterEvent) => void;
     private playerLeaveAfterEventHandle: (arg: PlayerLeaveAfterEvent) => void;
+    private playerDieAfterEventHandle: (arg: EntityDieAfterEvent) => void;
+    private playerSpawnAfterEventHandle: (arg: PlayerSpawnAfterEvent) => void;
     private taggerGameLoopHandle: number = undefined;
 
     constructor() {
@@ -139,7 +109,7 @@ export class TagGame {
         // Initialize the player data
         this.playerData = new Map();
 
-        this.FINDER = new ItemStack(MinecraftItemTypes.BlazeRod, 1);
+        this.FINDER = new ItemStack(MinecraftItemTypes.BreezeRod, 1);
         this.FINDER.nameTag = "finder"
 
         this.tagTimeScoreboard = world.scoreboard.getObjective(this.TAGTIME_SCOREBOARD_ID);
@@ -205,25 +175,22 @@ export class TagGame {
         }
     }
 
-    start(player: Player, initOptions?: TagGameInitOptions) {
-        if (initOptions !== undefined) {
-            this.initOptions = initOptions
+    buildInitOptions(player: Player, initOptions?: TagGameInitOptions): TagGameInitOptions {
+        const builtInitOptions: TagGameInitOptions = initOptions ?? {};
+
+        if (!builtInitOptions.clearPlayerInventories) {
+            builtInitOptions.clearPlayerInventories = true;
         }
 
-        if (this.initOptions === undefined) {
-            this.initOptions = {
-                clearPlayerInventories: true,
-                defaultTaggerName: "nulkref", //TODO: undefined,
-                tagAreaSideLength: 100,
-                defaultInventoryItems: []
-            };
+        if (!builtInitOptions.defaultInventoryItems) {
+            builtInitOptions.defaultInventoryItems = [];
 
             var playerActor = new PlayerActor(player);
             var inventory = playerActor.getInventory();
             for (let i = 0; i < inventory.inventorySize; i++) {
                 const itemStack = inventory.container.getItem(i);
                 if (itemStack !== undefined && itemStack.nameTag !== this.FINDER.nameTag) {
-                    this.initOptions.defaultInventoryItems.push({
+                    builtInitOptions.defaultInventoryItems.push({
                         amount: itemStack.amount,
                         typeId: itemStack.typeId
                     });
@@ -231,15 +198,33 @@ export class TagGame {
             }
         }
 
-        this.spawnLocation = {
-            dimension: player.dimension,
-            x: player.location.x,
-            y: player.location.y,
-            z: player.location.z
-        };
+        if (!builtInitOptions.defaultTaggerName) {
+            builtInitOptions.defaultTaggerName = player.name;
+        }
 
-        this.initScoreboards(player);
-        this.initPlayers(player);
+        if (!builtInitOptions.tagAreaSideLength) {
+            builtInitOptions.tagAreaSideLength = 4;
+        }
+
+        return builtInitOptions;
+    }
+
+    start(player: Player, initOptions?: TagGameInitOptions) {
+        // if this is a brand new game, proceed with initialization
+        if (this.gameState === TagGameStates.New) {
+            this.initOptions = this.buildInitOptions(player, initOptions);
+
+            this.spawnLocation = {
+                dimension: player.dimension,
+                x: player.location.x,
+                y: player.location.y,
+                z: player.location.z
+            };
+
+            this.initScoreboards(player);
+            this.initPlayers(player);
+        }
+
         this.subscribeToEvents(player);
         this.setupBackgroundActions();
 
@@ -251,6 +236,22 @@ export class TagGame {
 
         this.unsubscribeFromEvents();
         this.cleanupBackgroundActions();
+    }
+
+    reset() {
+        Logger.debug("reset game");
+
+        this.stop();
+
+        try {
+            Logger.debug("removing scoreboards from UI");
+            world.scoreboard.clearObjectiveAtDisplaySlot(DisplaySlotId.Sidebar);
+            world.scoreboard.clearObjectiveAtDisplaySlot(DisplaySlotId.List);
+        }
+        catch (error) {
+            Logger.error(`reset error: ${typeof error}. Error: ${error}`);
+            console.error(`reset failed.Type: ${typeof error}. Error: ${error}`);
+        }
     }
 
     private initScoreboards(player: Player) {
@@ -324,27 +325,9 @@ export class TagGame {
             }
         }
 
-        // Setup Tagger and Runner Inventories
+        // Setup players and scoreboards
         this.playerData.forEach(playerData => {
-            if (!playerData.inventoryConfigured) {
-                if (this.initOptions.clearPlayerInventories) {
-                    playerData.playerActor.getInventory().container.clearAll();
-                }
-
-                const inventory = playerData.playerActor.getInventory();
-                if (this.initOptions.defaultInventoryItems !== undefined) {
-                    this.initOptions.defaultInventoryItems.forEach(item => {
-                        inventory.container.addItem(new ItemStack(item.typeId, item.amount));
-                    })
-                }
-
-                // Tagger inventory
-                if (playerData.isTagger) {
-                    inventory.container.addItem(this.buildFinderItemStack());
-                }
-
-                playerData.inventoryConfigured = true;
-            }
+            this.setupPlayerInventory(playerData);
 
             this.tagCountScoreboard.addScore(playerData.playerActor.player, 0);
             this.tagTimeScoreboard.addScore(playerData.playerActor.player, 0);
@@ -393,66 +376,39 @@ export class TagGame {
         if (this.entityHitEntityEventHandle === undefined) {
             Logger.debug("subscribing to entityHitEntity event", player);
             this.entityHitEntityEventHandle = world.afterEvents.entityHitEntity.subscribe(eventData => {
-                Logger.debug("Tagger needs to change!")
                 Logger.debug(`## EntityHitEntity event: \n   HEntity: (${eventData.hitEntity.typeId}, ${eventData.hitEntity.nameTag}) \n   DEntity: (${eventData.damagingEntity.typeId}, ${eventData.damagingEntity.nameTag})`);
 
-                // was the damaging entity a tagger and the hit entity a runner?
                 const taggingPlayerData = this.playerData.get(eventData.damagingEntity.nameTag);
                 const taggedPlayerData = this.playerData.get(eventData.hitEntity.nameTag);
 
-                if (taggingPlayerData.isTagger && !taggedPlayerData.isTagger) {
-                    try {
-                        // you caught 'em!
-                        // - update player data object
-                        // - remove the finder item from inventory
-                        taggingPlayerData.isTagger = false;
-                        taggingPlayerData.targetPlayerName = undefined;
-                        taggingPlayerData.tagTimeInSecondsActive = 0;
-                        const inventoryA = taggingPlayerData.playerActor.getInventory();
-                        for (let i = 0; i < inventoryA.inventorySize; i++) {
-                            const item = inventoryA.container.getItem(i);
-                            if (item !== undefined && item.nameTag === this.FINDER.nameTag) {
-                                Logger.debug(`Item in slot ${i}: ${item?.amount} x ${item?.typeId} w/ name ${item?.nameTag}`);
-                                inventoryA.container.setItem(i, undefined);
-                            }
-                        }
+                this.transitionTagger(taggedPlayerData, taggingPlayerData);
+            }, {
+                entityTypes: [MinecraftEntityTypes.Player]
+            });
+        }
 
-                        // you've been caught
-                        // - update player data object
-                        // - remove the finder item from inventory
-                        // - TP them to the center of the tag area
-                        taggedPlayerData.isTagger = true;
-                        taggedPlayerData.taggerCount++;
-                        this.incrementScore(this.tagCountScoreboard, taggedPlayerData.playerActor.player);
-                        const inventoryB = taggedPlayerData.playerActor.getInventory();
-                        inventoryB.container.addItem(this.buildFinderItemStack());
-
-                        // Update Tagger and Runner lists
-                        const runnerIdx = this.runners.indexOf(taggedPlayerData.playerName);
-                        if (runnerIdx >= 0) {
-                            this.runners[runnerIdx] = taggingPlayerData.playerName;
-                        }
-
-                        const taggerIdx = this.taggers.indexOf(taggingPlayerData.playerName);
-                        if (taggerIdx >= 0) {
-                            this.taggers[taggerIdx] = taggedPlayerData.playerName;
-                        }
-
-                        Logger.debug(`Tagger changed to ${taggedPlayerData.playerName}`);
-
-                        taggedPlayerData.playerActor.player.teleport({
-                            x: this.spawnLocation.x,
-                            y: this.spawnLocation.y,
-                            z: this.spawnLocation.z
-                        });
-                    }
-                    catch (error) {
-                        Logger.error(`entityHitEntity error: ${typeof error}. Error: ${error}`);
-                        console.error(`TagArea.build failed.Type: ${typeof error}. Error: ${error}`);
-                    }
+        if (this.playerDieAfterEventHandle === undefined) {
+            Logger.debug("subscribing to entity die event", player);
+            this.playerDieAfterEventHandle = world.afterEvents.entityDie.subscribe(eventData => {
+                if (this.rules.becomeTaggerOnDeath) {
+                    // If the player dies from another player, then it doesn't count
                 }
             }, {
                 entityTypes: [MinecraftEntityTypes.Player]
+            });
+        }
+
+        if (this.playerSpawnAfterEventHandle === undefined) {
+            Logger.debug("subscribing to player spawn event", player);
+            this.playerSpawnAfterEventHandle = world.afterEvents.playerSpawn.subscribe(eventData => {
+                const player = eventData.player;
+                const playerData = this.playerData.get(player.name);
+
+                if (playerData !== undefined) {
+                    system.run(() => {
+                        this.setupPlayerInventory(playerData);
+                    });
+                }
             });
         }
 
@@ -496,6 +452,11 @@ export class TagGame {
             this.entityHitEntityEventHandle = undefined;
         }
 
+        if (this.playerDieAfterEventHandle !== undefined) {
+            world.afterEvents.entityDie.unsubscribe(this.playerDieAfterEventHandle);
+            this.playerDieAfterEventHandle = undefined;
+        }
+
         if (this.playerLeaveAfterEventHandle !== undefined) {
             world.afterEvents.playerLeave.unsubscribe(this.playerLeaveAfterEventHandle);
             this.playerLeaveAfterEventHandle = undefined;
@@ -507,7 +468,7 @@ export class TagGame {
             this.taggerGameLoopHandle = system.runInterval(() => {
                 this.taggers.forEach(name => {
                     const playerData = this.playerData.get(name);
-                    playerData.incrementTagTime();
+                    playerData?.incrementTagTime();
 
                     // Action Bar label
                     const trackingText = playerData?.targetPlayerName ?? "<no one>";
@@ -539,8 +500,8 @@ export class TagGame {
             scoreboard.setScore(player, currentScore + 1);
         }
         catch (error) {
-            Logger.error(`entityHitEntity error: ${typeof error}. Error: ${error}`);
-            console.error(`TagArea.build failed.Type: ${typeof error}. Error: ${error}`);
+            Logger.error(`incrementScore error: ${typeof error}. Error: ${error}`);
+            console.error(`incrementScore failed.Type: ${typeof error}. Error: ${error}`);
         }
     }
 
@@ -551,8 +512,30 @@ export class TagGame {
         }
     }
 
+    private setupPlayerInventory(playerData: PlayerData) {
+        if (this.initOptions.clearPlayerInventories) {
+            playerData.playerActor.getInventory().container.clearAll();
+        }
+
+        // Setup all player inventory
+        const inventory = playerData.playerActor.getInventory();
+        if (this.initOptions.defaultInventoryItems !== undefined) {
+            this.initOptions.defaultInventoryItems.forEach(item => {
+                const itemStack = new ItemStack(item.typeId, item.amount);
+                itemStack.lockMode = ItemLockMode.inventory;
+                itemStack.keepOnDeath = true;
+                inventory.container.addItem(itemStack);
+            })
+        }
+
+        // Setup tagger inventory
+        if (playerData.isTagger) {
+            inventory.container.addItem(this.buildFinderItemStack());
+        }
+    }
+
     private buildFinderItemStack(): ItemStack {
-        const finder = new ItemStack(MinecraftItemTypes.BlazeRod, 1);
+        const finder = new ItemStack(this.FINDER.typeId, 1);
         finder.nameTag = this.FINDER.nameTag;
         finder.keepOnDeath = true;
         finder.lockMode = ItemLockMode.inventory;
@@ -579,6 +562,61 @@ export class TagGame {
             return 0;
         });
         return sortedNames;
+    }
+
+    private transitionTagger(newTaggerPlayerData: PlayerData, originalTaggerPlayerData: PlayerData) {
+        // was the damaging entity a tagger and the hit entity a runner?
+        if (originalTaggerPlayerData.isTagger && !newTaggerPlayerData.isTagger) {
+            try {
+                // you caught 'em!
+                // - update player data object
+                // - remove the finder item from inventory
+                originalTaggerPlayerData.isTagger = false;
+                originalTaggerPlayerData.targetPlayerName = undefined;
+                originalTaggerPlayerData.tagTimeInSecondsActive = 0;
+                const inventoryA = originalTaggerPlayerData.playerActor.getInventory();
+                for (let i = 0; i < inventoryA.inventorySize; i++) {
+                    const item = inventoryA.container.getItem(i);
+                    if (item !== undefined && item.nameTag === this.FINDER.nameTag) {
+                        Logger.debug(`Item in slot ${i}: ${item?.amount} x ${item?.typeId} w/ name ${item?.nameTag}`);
+                        inventoryA.container.setItem(i, undefined);
+                    }
+                }
+
+                // you've been caught
+                // - update player data object
+                // - remove the finder item from inventory
+                // - TP them to the center of the tag area
+                newTaggerPlayerData.isTagger = true;
+                newTaggerPlayerData.taggerCount++;
+                this.incrementScore(this.tagCountScoreboard, newTaggerPlayerData.playerActor.player);
+                const inventoryB = newTaggerPlayerData.playerActor.getInventory();
+                inventoryB.container.addItem(this.buildFinderItemStack());
+
+                // Update Tagger and Runner lists
+                const runnerIdx = this.runners.indexOf(newTaggerPlayerData.playerName);
+                if (runnerIdx >= 0) {
+                    this.runners[runnerIdx] = originalTaggerPlayerData.playerName;
+                }
+
+                const taggerIdx = this.taggers.indexOf(originalTaggerPlayerData.playerName);
+                if (taggerIdx >= 0) {
+                    this.taggers[taggerIdx] = newTaggerPlayerData.playerName;
+                }
+
+                Logger.debug(`Tagger changed to ${newTaggerPlayerData.playerName}`);
+
+                newTaggerPlayerData.playerActor.player.teleport({
+                    x: this.spawnLocation.x,
+                    y: this.spawnLocation.y,
+                    z: this.spawnLocation.z
+                });
+            }
+            catch (error) {
+                Logger.error(`transitionTagger error: ${typeof error}. Error: ${error}`);
+                console.error(`transitionTagger failed.Type: ${typeof error}. Error: ${error}`);
+            }
+        }
     }
 
     private setNextTargetPlayer(player: Player) {
@@ -650,7 +688,9 @@ export class TagGame {
         particleVector.y = origin.y + 2;
 
         Logger.debug(`${origin} = O \n${trackedEntityLocation} = T \n${direction} = D\n${directionNormalized} = DN\n${particleVector} = PV`, player);
-        player.sendMessage(`y-location: ${trackedEntityLocation.y}`);
+
+        const yDelta = origin.y - trackedEntityLocation.y;
+        player.sendMessage(`delta y-location: ${yDelta}`);
 
         for (let i = 0; i < 100; i++) {
             const mvMap = new MolangVariableMap();

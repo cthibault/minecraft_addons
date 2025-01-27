@@ -250,6 +250,7 @@ export class ChatCommandManager {
                 }
             }
 
+            Logger.debug(`${options.chatCommandDefinition.name} command received...`, options.player);
             commandRegistration.onExecute(options);
         });
     }
@@ -275,4 +276,4 @@ export class ChatCommandManager {
     }
 }
 
-export const ChatCommands = new ChatCommandManager("$");
+export const ChatCommands = new ChatCommandManager();

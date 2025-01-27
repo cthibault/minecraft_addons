@@ -2,7 +2,7 @@ import { world, system, Player } from "@minecraft/server";
 import { ChatColorCodes } from "./ChatCodes.js"
 
 export class Logger {
-    public static IN_DEBUG_MODE: boolean = true;
+    public static IN_DEBUG_MODE: boolean = false;
 
     static debug(message: string, player?: Player) {
         if (Logger.IN_DEBUG_MODE) {

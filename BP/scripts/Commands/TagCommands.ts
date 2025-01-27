@@ -1,44 +1,55 @@
 import { Player, world, system } from "@minecraft/server";
-//import ChatCommand from './CommandDefinition.js'
-import { ChatCommandExecutionOptions, ChatCommandBuilder, ChatCommandManager, ChatCommands } from './MyChatCommand.js'
-import { TagGame, TagGameStates, TagGameJsonDataOptions } from "../Games/TagGameBase.js"
+import { ChatCommandExecutionOptions, ChatCommandBuilder, ChatCommands } from './ChatCommands.js'
+import { TagGame, TagGameStates, TagGameInitOptions, TagGameJsonDataOptions } from "../Games/TagGameBase.js"
 import { ChatColorCodes } from "../System/ChatCodes.js"
 
-let game: TagGame = new TagGame();
+let gameInstance: TagGame = undefined;
 
-function isTagAdmin(player: Player): boolean {
-    const isAdmin = player.hasTag("tagAdmin");
-    return isAdmin;
+function getCurrentGame(): TagGame {
+    if (gameInstance === undefined) {
+        gameInstance = new TagGame();
+    }
+
+    return gameInstance;
 }
 
 ChatCommands.register(
-    new ChatCommandBuilder('StartGame')
+    new ChatCommandBuilder('TagStart')
         .withDescription('Start a new game of tag')
         .withPermissions(['tagAdmin'])
         .withGroup("tag")
-        .withAliases(['ts'])
+        .withAliases(['tstart'])
+        .withArgument({ name: "tagger", type: "string", defaultValue: undefined, description: "name of the initial tagger" })
+        .withEmptyArgumentSet()
+        .withCompleteArgumentSet()
         .build(),
     (options: ChatCommandExecutionOptions) => {
-        options.player.sendMessage(`StartGame command received...`);
         system.run(() => {
+            const game = getCurrentGame();
             if (game !== null) {
-                options.player.sendMessage(`  Start Game...`);
-                game.start(options.player);
+                const initOptions: TagGameInitOptions = {
+                }
+
+                if (options.parsedArgs.tagger !== undefined) {
+                    initOptions.defaultTaggerName = options.parsedArgs.tagger
+                }
+                game.start(options.player, initOptions);
             }
         });
     });
+// 
 
 ChatCommands.register(
-    new ChatCommandBuilder('StopGame')
-        .withDescription('Start a new game of tag')
+    new ChatCommandBuilder('TagStop')
+        .withDescription('Stop the current game of tag')
         .withPermissions(['tagAdmin'])
         .withGroup("tag")
         .withAliases(['tstop'])
         .build(),
     (options: ChatCommandExecutionOptions) => {
-        options.player.sendMessage(`StopGame command received...`);
         system.run(() => {
-            if (game !== null) {
+            const game = getCurrentGame();
+            if (game !== null && game.gameState === TagGameStates.Active) {
                 options.player.sendMessage(`  Stop Game...`);
                 game.stop();
             }
@@ -46,48 +57,77 @@ ChatCommands.register(
     });
 
 ChatCommands.register(
-    new ChatCommandBuilder('GetGameData')
+    new ChatCommandBuilder('TagReset')
+        .withDescription('Reset the current game of tag')
+        .withPermissions(['tagAdmin'])
+        .withGroup("tag")
+        .withAliases(['treset'])
+        .build(),
+    (options: ChatCommandExecutionOptions) => {
+        system.run(() => {
+            const game = getCurrentGame();
+            if (game !== null) {
+                game.reset();
+                gameInstance = undefined;
+            }
+        });
+    });
+
+ChatCommands.register(
+    new ChatCommandBuilder('TagGameData')
         .withDescription('Dump the game data for the current game of tag')
         .withPermissions(['tagAdmin'])
         .withGroup("tag")
-        .withAliases(['td'])
+        .withAliases(['tdata'])
         .withArgument({ name: "includePlayerData", type: "boolean", description: "flag indicating the player data should be included in the output" })
         .withArgument({ name: "includeTagArea", type: "boolean", description: "flag indicating tag area data should be included in the output" })
         .withEmptyArgumentSet()
         .withCompleteArgumentSet()
-        .withArgumentSet({ name: "abc", argumentNamesInOrder: ["includePlayerData"] })
+        .withArgumentSet({ name: "playerDataOnly", argumentNamesInOrder: ["includePlayerData"] })
         .build(),
     (options: ChatCommandExecutionOptions) => {
-        options.player.sendMessage(`GetGameData command received...`);
         system.run(() => {
+            const game = getCurrentGame();
             if (game !== null) {
                 options.player.sendMessage(`${ChatColorCodes.gray}${game.getDataJson({
-                    includePlayerData: options.parsedArgs?.includePlayerData ?? true,
-                    includeTagArea: options.parsedArgs?.includeTagArea ?? true,
+                    includePlayerData: options.parsedArgs?.includePlayerData ?? false,
+                    includeTagArea: options.parsedArgs?.includeTagArea ?? false,
                 })}`);
             }
         });
     });
 
-
-ChatCommand.create('BuildBorder', 'Build the boarder', ['bb'], { 'sideLength': 'number' }, isTagAdmin, (player, args) => {
-    player.sendMessage(`Build boarder command received...`);
-    system.run(() => {
-        player.sendMessage(`Building a border with a side length of ${args['sideLength']}.`);
-        game.gameTagArea.build(player, args['sideLength']);
+ChatCommands.register(
+    new ChatCommandBuilder('BuildBorder')
+        .withDescription('Build a boarder for a given tag area')
+        .withPermissions(['tagAdmin'])
+        .withGroup("tag")
+        .withAliases(['bb'])
+        .withArgument({ name: "sideLength", type: "number", defaultValue: 10, description: "side length of the boundary border" })
+        .build(),
+    (options: ChatCommandExecutionOptions) => {
+        system.run(() => {
+            const game = getCurrentGame();
+            if (game !== null) {
+                options.player.sendMessage(`Building a border with a side length of ${options.parsedArgs.sideLength}.`);
+                game.gameTagArea.build(options.player, options.parsedArgs.sideLength)
+            }
+        });
     });
-});
 
-ChatCommand.create('ResetBorder', 'Reset the boarder', ['rb'], undefined, isTagAdmin, (player, args) => {
-    player.sendMessage(`Reset boarder command received...`);
-    system.run(() => {
-        game.gameTagArea.reset(player);
+ChatCommands.register(
+    new ChatCommandBuilder('RemoveBorder')
+        .withDescription('Remove the boarder for a given tag area')
+        .withPermissions(['tagAdmin'])
+        .withGroup("tag")
+        .withAliases(['rb'])
+        .build(),
+    (options: ChatCommandExecutionOptions) => {
+        system.run(() => {
+            const game = getCurrentGame();
+            if (game !== null) {
+                options.player.sendMessage(`Remove the border for the current tag area.`);
+                game.gameTagArea.reset(options.player);
+            }
+        });
     });
-});
-
-ChatCommand.create('GetTagArea', 'Get tag area data', ['gta'], undefined, isTagAdmin, (player, args) => {
-    player.sendMessage(`Get Tag Area data command received...`);
-    system.run(() => {
-        player.sendMessage(`${game.gameTagArea}`);
-    });
-});
